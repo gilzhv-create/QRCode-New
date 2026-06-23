@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>סורק פריטים</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 10px; text-align: center; background-color: #f4f4f9; direction: rtl; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 15px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        button { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 10px 5px; border: none; border-radius: 8px; font-weight: bold; }
+        .btn-start { background-color: #28a745; color: white; width: 100%; }
+        .btn-stop { background-color: #dc3545; color: white; width: 100%; margin-top: 15px; }
+        .btn-save { background-color: #007bff; color: white; width: 100%; margin-top: 10px; }
+        .btn-cancel { background-color: #6c757d; color: white; width: 100%; margin-top: 5px; }
+        input { padding: 12px; width: 90%; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; text-align: center; font-size: 16px; }
+        #reader { width: 100%; border-radius: 10px; overflow: hidden; background: #000; margin-top: 10px; }
+        
+        #input-area { display: none; background: #fff; padding: 15px; border: 3px solid #007bff; border-radius: 10px; margin-top: 10px; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 85%; z-index: 100; box-shadow: 0 -5px 20px rgba(0,0,0,0.3); }
+        #duplicate-warning { display: none; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 8px; margin-bottom: 10px; border-radius: 5px; font-size: 13px; font-weight: bold; text-align: right; }
+        
+        #log { margin-top: 15px; text-align: right; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 10px; max-height: 180px; overflow-y: auto; }
+        .scan-item { background: #fff; padding: 8px; margin-bottom: 5px; border-radius: 5px; border-right: 4px solid #007bff; list-style: none; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+        .btn-delete { background: #dc3545; color: white; border: none; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin: 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>סורק פריטים</h2>
+    
+    <div id="setup-step">
+        <input type="text" id="user-name" placeholder="שם המבצע">
+        <input type="text" id="site-id" placeholder="מספר אתר">
+        <input type="text" id="package-id" placeholder="מספר אריזה">
+        <button class="btn-start" onclick="startScanning()">התחל סריקה</button>
+    </div>
+
+    <div id="scan-step" style="display:none;">
+        <div id="display-info" style="font-size: 13px; font-weight: bold; color: #333; background: #e9ecef; padding: 8px; border-radius: 5px;"></div>
+        
+        <div id="log">
+            <strong>פריטים שנסרקו לאחרונה:</strong>
+            <ul id="scan-list" style="padding: 0; margin: 5px 0 0 0;"></ul>
+        </div>
+
+        <div id="reader"></div>
+        <button class="btn-stop" onclick="stopScanning()">סיים והורד דו"ח</button>
+    </div>
+
+    <div id="input-area">
+        <div id="duplicate-warning">🚨 שים לב! פריט זה כבר נסרק. שמירה מחדש תעדכן ותחליף את הכמות הקודמת.</div>
+        <div id="scanned-code-display" style="font-weight: bold; margin-bottom: 10px; color: #007bff; word-break: break-all;"></div>
+        
+        <label id="qty-label" for="item-qty" style="display: block; font-weight: bold; margin-bottom: 5px; color: #333; text-align: right; padding-right: 5%;">כמות פריטים:</label>
+        <input type="number" id="item-qty" placeholder="הכנס כמות" value="1">
+        
+        <button id="btn-submit-action" class="btn-save" onclick="saveItem()">שמור והמשך לסרוק</button>
+        <button class="btn-cancel" onclick="cancelItem()">ביטול / סרוק מחדש</button>
+    </div>
+</div>
+
+<script>
+    let scannedItems = [];
+    let html5QrCode;
+    let lastResult = "";
+    let userName = "", siteId = "", packageId = "";
+    let isUpdatingExisting = false; 
+    let existingItemIndex = -1;     
+
+    function startScanning() {
+        userName = document.getElementById('user-name').value.trim();
+        siteId = document.getElementById('site-id').value.trim();
+        packageId = document.getElementById('package-id').value.trim();
+
+        if (!userName || !siteId || !packageId) {
+            alert("נא למלא את כל השדות");
+            return;
+        }
+
+        document.getElementById('setup-step').style.display = 'none';
+        document.getElementById('scan-step').style.display = 'block';
+        
+        html5QrCode = new Html5Qrcode("reader");
+        launchCamera();
+        updateUI();
+    }
+
+    function launchCamera() {
+        html5QrCode.start(
+            { facingMode: "environment" }, 
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            onScanSuccess
+        ).catch(err => console.error("Camera error:", err));
+    }
+
+    function onScanSuccess(decodedText) {
+        if (decodedText === lastResult) return; 
+        
+        lastResult = decodedText;
+        html5QrCode.pause(true); 
+
+        existingItemIndex = scannedItems.findIndex(item => item.code === decodedText);
+        const inputPanel = document.getElementById('input-area');
+        const warningDiv = document.getElementById('duplicate-warning');
+        const submitBtn = document.getElementById('btn-submit-action');
+
+        if (existingItemIndex !== -1) {
+            isUpdatingExisting = true;
+            const currentQty = scannedItems[existingItemIndex].quantity;
+            
+            inputPanel.style.borderColor = "#dc3545"; 
+            warningDiv.style.display = "block";       
+            submitBtn.style.backgroundColor = "#dc3545"; 
+            submitBtn.style.color = "#fff";
+            submitBtn.innerText = "עדכן כמות והמשך";
+            
+            document.getElementById('qty-label').innerText = "עדכן כמות פריטים (נוכחי: " + currentQty + "):";
+            document.getElementById('item-qty').value = currentQty;
+        } else {
+            isUpdatingExisting = false;
+            
+            inputPanel.style.borderColor = "#007bff"; 
+            warningDiv.style.display = "none";        
+            submitBtn.style.backgroundColor = "#007bff";
+            submitBtn.style.color = "#fff";
+            submitBtn.innerText = "שמור והמשך לסרוק";
+            
+            document.getElementById('qty-label').innerText = "כמות פריטים:";
+            document.getElementById('item-qty').value = "1";
+        }
+
+        document.getElementById('scanned-code-display').innerText = "קוד: " + decodedText;
+        inputPanel.style.display = 'block';
+        
+        setTimeout(() => {
+            const qtyInput = document.getElementById('item-qty');
+            qtyInput.focus();
+            qtyInput.select();
+        }, 100);
+    }
+
+    function saveItem() {
+        const qty = document.getElementById('item-qty').value;
+        if (!qty || qty <= 0) {
+            alert("הכנס כמות תקינה");
+            return;
+        }
+
+        if (isUpdatingExisting && existingItemIndex !== -1) {
+            scannedItems[existingItemIndex].quantity = qty;
+            scannedItems[existingItemIndex].time = new Date().toLocaleTimeString('he-IL');
+        } else {
+            const item = {
+                id: Date.now(), 
+                code: lastResult,
+                quantity: qty,
+                time: new Date().toLocaleTimeString('he-IL')
+            };
+            scannedItems.push(item);
+        }
+
+        updateUI();
+        closeInputArea();
+    }
+
+    function deleteItem(id) {
+        scannedItems = scannedItems.filter(item => item.id !== id);
+        updateUI();
+    }
+
+    function cancelItem() {
+        closeInputArea();
+    }
+
+    function closeInputArea() {
+        document.getElementById('input-area').style.display = 'none';
+        document.getElementById('item-qty').value = "1";
+        lastResult = "";
+        isUpdatingExisting = false;
+        existingItemIndex = -1;
+        html5QrCode.resume(); 
+    }
+
+    function updateUI() {
+        document.getElementById('display-info').innerText = 
+            "מבצע: " + userName + " | אתר: " + siteId + " | אריזה: " + packageId + " | סה\"כ ייחודיים: " + scannedItems.length;
+
+        const list = document.getElementById('scan-list');
+        list.innerHTML = "";
+        
+        if(scannedItems.length === 0) {
+            list.innerHTML = "<li style='list-style:none; color:#999; font-size:12px; text-align:center;'>אין פריטים ברשימה</li>";
+            return;
+        }
+
+        scannedItems.slice().reverse().forEach(item => {
+            const li = document.createElement('li');
+            li.className = "scan-item";
+            
+            const infoText = document.createElement('span');
+            infoText.innerHTML = "<b>" + item.code + "</b> | כמות: " + item.quantity + " <small style='color:#999;'>(" + item.time + ")</small>";
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = "btn-delete";
+            deleteBtn.innerText = "X";
+            deleteBtn.onclick = function() { deleteItem(item.id); };
+            
+            li.appendChild(infoText);
+            li.appendChild(deleteBtn);
+            list.appendChild(li);
+        });
+    }
+
+    function stopScanning() {
+        if (html5QrCode) {
+            html5QrCode.stop().then(generateReport).catch(err => console.error(err));
+        }
+    }
+
+    function generateReport() {
+        if (scannedItems.length === 0) {
+            alert("לא נסרקו פריטים, לא ניתן להפיק דוח ריק.");
+            location.reload();
+            return;
+        }
+
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        
+        // הגדרת הפורמטים בדיוק לפי הדרישה:
+        const dateForCSV = `${day}/${month}/${year}`;      // בתוך הקובץ: DD/MM/YYYY
+        const dateForFilename = `${year}${month}${day}`;   // בשם הקובץ: YYYYMMDD
+
+        let csv = "\uFEFF";
+        csv += "תאריך סריקה," + dateForCSV + "\n"; 
+        csv += "שם המבצע," + userName + "\n";
+        csv += "אתר," + siteId + "\n";
+        csv += "אריזה," + packageId + "\n\n";
+        csv += "קוד פריט,כמות,זמן סריקה\n";
+        
+        scannedItems.forEach(item => {
+            csv += `"${item.code}","${item.quantity}","${item.time}"\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        
+        // שם הקובץ: report_[אתר]_[אריזה]_[yyyymmdd].csv
+        a.download = `report_${siteId}_${packageId}_${dateForFilename}.csv`;
+        a.click();
+        
+        alert("הדווח הופק ונשמר בהצלחה!");
+        location.reload();
+    }
+</script>
+
+</body>
+</html>
