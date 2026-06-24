@@ -3,18 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>סורק פריטים</title>
+    <title>מערכת סריקה והדפסה</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         body { font-family: sans-serif; margin: 0; padding: 10px; text-align: center; background-color: #f4f4f9; direction: rtl; }
         .container { max-width: 500px; margin: auto; background: white; padding: 15px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         button { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 10px 5px; border: none; border-radius: 8px; font-weight: bold; }
+        .btn-main { background-color: #6f42c1; color: white; width: 100%; margin-bottom: 10px; font-size: 18px; }
         .btn-start { background-color: #28a745; color: white; width: 100%; }
         .btn-stop { background-color: #dc3545; color: white; width: 100%; margin-top: 15px; }
         .btn-save { background-color: #007bff; color: white; width: 100%; margin-top: 10px; }
         .btn-cancel { background-color: #6c757d; color: white; width: 100%; margin-top: 5px; }
+        .btn-back { background-color: #6c757d; color: white; width: 100%; margin-top: 15px; }
         input { padding: 12px; width: 90%; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; text-align: center; font-size: 16px; }
-        #reader { width: 100%; border-radius: 10px; overflow: hidden; background: #000; margin-top: 10px; }
+        #reader, #sticker-reader { width: 100%; border-radius: 10px; overflow: hidden; background: #000; margin-top: 10px; }
         
         #input-area { display: none; background: #fff; padding: 15px; border: 3px solid #007bff; border-radius: 10px; margin-top: 10px; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 85%; z-index: 100; box-shadow: 0 -5px 20px rgba(0,0,0,0.3); }
         #duplicate-warning { display: none; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 8px; margin-bottom: 10px; border-radius: 5px; font-size: 13px; font-weight: bold; text-align: right; }
@@ -27,16 +29,23 @@
 <body>
 
 <div class="container">
-    <h2>סורק פריטים</h2>
+    <div id="main-menu">
+        <h2>בחר פעולה</h2>
+        <button class="btn-main" onclick="showScreen('setup-step')">סריקת פריטים</button>
+        <button class="btn-main" style="background-color: #fd7e14;" onclick="startStickerMode()">הדפסת מדבקות</button>
+    </div>
     
-    <div id="setup-step">
+    <div id="setup-step" style="display:none;">
+        <h2>סריקת פריטים - הגדרות</h2>
         <input type="text" id="user-name" placeholder="שם המבצע">
         <input type="text" id="site-id" placeholder="מספר אתר">
         <input type="text" id="package-id" placeholder="מספר אריזה">
         <button class="btn-start" onclick="startScanning()">התחל סריקה</button>
+        <button class="btn-back" onclick="showScreen('main-menu')">חזור לתפריט</button>
     </div>
 
     <div id="scan-step" style="display:none;">
+        <h2>סריקת פריטים</h2>
         <div id="display-info" style="font-size: 13px; font-weight: bold; color: #333; background: #e9ecef; padding: 8px; border-radius: 5px;"></div>
         
         <div id="log">
@@ -46,6 +55,13 @@
 
         <div id="reader"></div>
         <button class="btn-stop" onclick="stopScanning()">סיים והורד דו"ח</button>
+    </div>
+
+    <div id="sticker-step" style="display:none;">
+        <h2>הדפסת מדבקות</h2>
+        <p style="font-size: 14px; color: #555;">סרוק קוד QR המכיל מספרים מופרדים ב- ( ; ) להורדת קובץ ה-CSV</p>
+        <div id="sticker-reader"></div>
+        <button class="btn-back" onclick="stopStickerScanning()">חזור לתפריט</button>
     </div>
 
     <div id="input-area">
@@ -63,11 +79,23 @@
 <script>
     let scannedItems = [];
     let html5QrCode;
+    let stickerQrCode;
     let lastResult = "";
     let userName = "", siteId = "", packageId = "";
     let isUpdatingExisting = false; 
     let existingItemIndex = -1;     
 
+    // פונקציית ניווט בין מסכים
+    function showScreen(screenId) {
+        document.getElementById('main-menu').style.display = 'none';
+        document.getElementById('setup-step').style.display = 'none';
+        document.getElementById('scan-step').style.display = 'none';
+        document.getElementById('sticker-step').style.display = 'none';
+        
+        document.getElementById(screenId).style.display = 'block';
+    }
+
+    /* === מנגנון סריקת פריטים (הקוד המקורי שלך) === */
     function startScanning() {
         userName = document.getElementById('user-name').value.trim();
         siteId = document.getElementById('site-id').value.trim();
@@ -78,8 +106,7 @@
             return;
         }
 
-        document.getElementById('setup-step').style.display = 'none';
-        document.getElementById('scan-step').style.display = 'block';
+        showScreen('scan-step');
         
         html5QrCode = new Html5Qrcode("reader");
         launchCamera();
@@ -230,9 +257,8 @@
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const year = now.getFullYear();
         
-        // הגדרת הפורמטים בדיוק לפי הדרישה:
-        const dateForCSV = `${day}/${month}/${year}`;      // בתוך הקובץ: DD/MM/YYYY
-        const dateForFilename = `${year}${month}${day}`;   // בשם הקובץ: YYYYMMDD
+        const dateForCSV = `${day}/${month}/${year}`;      
+        const dateForFilename = `${year}${month}${day}`;   
 
         let csv = "\uFEFF";
         csv += "תאריך סריקה," + dateForCSV + "\n"; 
@@ -250,12 +276,74 @@
         const a = document.createElement("a");
         a.href = url;
         
-        // שם הקובץ: report_[אתר]_[אריזה]_[yyyymmdd].csv
         a.download = `report_${siteId}_${packageId}_${dateForFilename}.csv`;
         a.click();
         
         alert("הדווח הופק ונשמר בהצלחה!");
         location.reload();
+    }
+
+
+    /* === מנגנון חדש: הדפסת מדבקות === */
+    function startStickerMode() {
+        showScreen('sticker-step');
+        stickerQrCode = new Html5Qrcode("sticker-reader");
+        
+        stickerQrCode.start(
+            { facingMode: "environment" }, 
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            onStickerScanSuccess
+        ).catch(err => console.error("Sticker Camera error:", err));
+    }
+
+    function onStickerScanSuccess(decodedText) {
+        // עצירת הסורק כדי למנוע סריקות כפולות בזמן העיבוד
+        stickerQrCode.pause(true);
+
+        // פירוק הערכים לפי נקודה פסיק וניקוי רווחים מיותרים
+        const items = decodedText.split(';').map(item => item.trim()).filter(item => item !== "");
+
+        if (items.length === 0) {
+            alert("הקוד שנסרק ריק או שאינו מכיל נתונים תקינים.");
+            stickerQrCode.resume();
+            return;
+        }
+
+        // יצירת תוכן ה-CSV - מספר בכל שורה
+        let csvContent = "\uFEFF"; // תמיכה בעברית/סימנים בתוכנות כמו אקסל
+        items.forEach(num => {
+            csvContent += `"${num}"\n`;
+        });
+
+        // יצירת קובץ והורדה
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        
+        const now = new Date();
+        const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        a.href = url;
+        a.download = `stickers_${timestamp}.csv`;
+        a.click();
+
+        alert(`נמצאו ${items.length} מספרים. קובץ ה-CSV הופק בהצלחה!`);
+        
+        // חזרה אוטומטית למסך הראשי ורענון המצב
+        stopStickerScanning();
+    }
+
+    function stopStickerScanning() {
+        if (stickerQrCode) {
+            stickerQrCode.stop().then(() => {
+                showScreen('main-menu');
+            }).catch(err => {
+                console.error(err);
+                showScreen('main-menu');
+            });
+        } else {
+            showScreen('main-menu');
+        }
     }
 </script>
 
