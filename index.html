@@ -21,7 +21,7 @@
         #input-area { display: none; background: #fff; padding: 15px; border: 3px solid #007bff; border-radius: 10px; margin-top: 10px; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 85%; z-index: 100; box-shadow: 0 -5px 20px rgba(0,0,0,0.3); }
         #duplicate-warning { display: none; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 8px; margin-bottom: 10px; border-radius: 5px; font-size: 13px; font-weight: bold; text-align: right; }
         
-        #log { margin-top: 15px; text-align: right; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 10px; max-height: 180px; overflow-y: auto; }
+        #log, #sticker-log { margin-top: 15px; text-align: right; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 10px; max-height: 180px; overflow-y: auto; }
         .scan-item { background: #fff; padding: 8px; margin-bottom: 5px; border-radius: 5px; border-right: 4px solid #007bff; list-style: none; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
         .btn-delete { background: #dc3545; color: white; border: none; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin: 0; }
     </style>
@@ -32,7 +32,7 @@
     <div id="main-menu">
         <h2>בחר פעולה</h2>
         <button class="btn-main" onclick="showScreen('setup-step')">סריקת פריטים</button>
-        <button class="btn-main" style="background-color: #fd7e14;" onclick="startStickerMode()">הדפסת מדבקות</button>
+        <button class="btn-main" style="background-color: #fd7e14;" onclick="prepareStickerMode()">הדפסת מדבקות</button>
     </div>
     
     <div id="setup-step" style="display:none;">
@@ -59,9 +59,22 @@
 
     <div id="sticker-step" style="display:none;">
         <h2>הדפסת מדבקות</h2>
-        <p style="font-size: 14px; color: #555;">סרוק קוד QR המכיל מספרים מופרדים ב- ( ; ) להורדת קובץ ה-CSV</p>
-        <div id="sticker-reader"></div>
-        <button class="btn-back" onclick="stopStickerScanning()">חזור לתפריט</button>
+        <p style="font-size: 14px; color: #555;">הפורמט הנדרש: Unit;Box;QR1;QR2...</p>
+        
+        <div id="sticker-setup-area">
+            <button class="btn-start" style="background-color: #fd7e14;" onclick="startStickerScanning()">התחל סריקה</button>
+            <button class="btn-back" onclick="showScreen('main-menu')">חזור לתפריט</button>
+        </div>
+
+        <div id="sticker-active-area" style="display: none;">
+            <div id="sticker-log">
+                <strong>שורות שנצברו ל-CSV (סה"כ: <span id="sticker-count">0</span>):</strong>
+                <ul id="sticker-list" style="padding: 0; margin: 5px 0 0 0;"></ul>
+            </div>
+            <div id="sticker-reader"></div>
+            <button class="btn-stop" style="background-color: #28a745;" onclick="generateStickerReport()">סיים והורד קובץ מדבקות</button>
+            <button class="btn-cancel" onclick="stopStickerScanningProcess()">ביטול וחזרה</button>
+        </div>
     </div>
 
     <div id="input-area">
@@ -78,6 +91,7 @@
 
 <script>
     let scannedItems = [];
+    let stickerItems = []; // צבירת פריטי מדבקות למסמך אחד
     let html5QrCode;
     let stickerQrCode;
     let lastResult = "";
@@ -85,7 +99,6 @@
     let isUpdatingExisting = false; 
     let existingItemIndex = -1;     
 
-    // פונקציית ניווט בין מסכים
     function showScreen(screenId) {
         document.getElementById('main-menu').style.display = 'none';
         document.getElementById('setup-step').style.display = 'none';
@@ -95,7 +108,7 @@
         document.getElementById(screenId).style.display = 'block';
     }
 
-    /* === מנגנון סריקת פריטים (הקוד המקורי שלך) === */
+    /* === מנגנון סריקת פריטים === */
     function startScanning() {
         userName = document.getElementById('user-name').value.trim();
         siteId = document.getElementById('site-id').value.trim();
@@ -107,7 +120,6 @@
         }
 
         showScreen('scan-step');
-        
         html5QrCode = new Html5Qrcode("reader");
         launchCamera();
         updateUI();
@@ -123,7 +135,6 @@
 
     function onScanSuccess(decodedText) {
         if (decodedText === lastResult) return; 
-        
         lastResult = decodedText;
         html5QrCode.pause(true); 
 
@@ -135,24 +146,18 @@
         if (existingItemIndex !== -1) {
             isUpdatingExisting = true;
             const currentQty = scannedItems[existingItemIndex].quantity;
-            
             inputPanel.style.borderColor = "#dc3545"; 
             warningDiv.style.display = "block";       
             submitBtn.style.backgroundColor = "#dc3545"; 
-            submitBtn.style.color = "#fff";
             submitBtn.innerText = "עדכן כמות והמשך";
-            
             document.getElementById('qty-label').innerText = "עדכן כמות פריטים (נוכחי: " + currentQty + "):";
             document.getElementById('item-qty').value = currentQty;
         } else {
             isUpdatingExisting = false;
-            
             inputPanel.style.borderColor = "#007bff"; 
             warningDiv.style.display = "none";        
             submitBtn.style.backgroundColor = "#007bff";
-            submitBtn.style.color = "#fff";
             submitBtn.innerText = "שמור והמשך לסרוק";
-            
             document.getElementById('qty-label').innerText = "כמות פריטים:";
             document.getElementById('item-qty').value = "1";
         }
@@ -178,13 +183,12 @@
             scannedItems[existingItemIndex].quantity = qty;
             scannedItems[existingItemIndex].time = new Date().toLocaleTimeString('he-IL');
         } else {
-            const item = {
+            scannedItems.push({
                 id: Date.now(), 
                 code: lastResult,
                 quantity: qty,
                 time: new Date().toLocaleTimeString('he-IL')
-            };
-            scannedItems.push(item);
+            });
         }
 
         updateUI();
@@ -196,9 +200,7 @@
         updateUI();
     }
 
-    function cancelItem() {
-        closeInputArea();
-    }
+    function cancelItem() { closeInputArea(); }
 
     function closeInputArea() {
         document.getElementById('input-area').style.display = 'none';
@@ -215,25 +217,18 @@
 
         const list = document.getElementById('scan-list');
         list.innerHTML = "";
-        
         if(scannedItems.length === 0) {
             list.innerHTML = "<li style='list-style:none; color:#999; font-size:12px; text-align:center;'>אין פריטים ברשימה</li>";
             return;
         }
-
         scannedItems.slice().reverse().forEach(item => {
             const li = document.createElement('li');
             li.className = "scan-item";
-            
-            const infoText = document.createElement('span');
-            infoText.innerHTML = "<b>" + item.code + "</b> | כמות: " + item.quantity + " <small style='color:#999;'>(" + item.time + ")</small>";
-            
+            li.innerHTML = `<span><b>${item.code}</b> | כמות: ${item.quantity} <small style='color:#999;'>(${item.time})</small></span>`;
             const deleteBtn = document.createElement('button');
             deleteBtn.className = "btn-delete";
             deleteBtn.innerText = "X";
             deleteBtn.onclick = function() { deleteItem(item.id); };
-            
-            li.appendChild(infoText);
             li.appendChild(deleteBtn);
             list.appendChild(li);
         });
@@ -247,48 +242,35 @@
 
     function generateReport() {
         if (scannedItems.length === 0) {
-            alert("לא נסרקו פריטים, לא ניתן להפיק דוח ריק.");
+            alert("לא נסרקו פריטים.");
             location.reload();
             return;
         }
-
         const now = new Date();
-        const day = String(now.getDate()).padStart(2, '0');
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const year = now.getFullYear();
+        const dateForCSV = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+        let csv = "\uFEFFתאריך סריקה," + dateForCSV + "\nשם המבצע," + userName + "\nאתר," + siteId + "\nאריזה," + packageId + "\n\nקוד פריט,כמות,זמן סריקה\n";
+        scannedItems.forEach(item => { csv += `"${item.code}","${item.quantity}","${item.time}"\n`; });
         
-        const dateForCSV = `${day}/${month}/${year}`;      
-        const dateForFilename = `${year}${month}${day}`;   
-
-        let csv = "\uFEFF";
-        csv += "תאריך סריקה," + dateForCSV + "\n"; 
-        csv += "שם המבצע," + userName + "\n";
-        csv += "אתר," + siteId + "\n";
-        csv += "אריזה," + packageId + "\n\n";
-        csv += "קוד פריט,כמות,זמן סריקה\n";
-        
-        scannedItems.forEach(item => {
-            csv += `"${item.code}","${item.quantity}","${item.time}"\n`;
-        });
-
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        
-        a.download = `report_${siteId}_${packageId}_${dateForFilename}.csv`;
-        a.click();
-        
-        alert("הדווח הופק ונשמר בהצלחה!");
+        downloadCSV(csv, `report_${siteId}_${packageId}_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.csv`);
+        alert("הדווח הופק בהצלחה!");
         location.reload();
     }
 
 
-    /* === מנגנון חדש: הדפסת מדבקות === */
-    function startStickerMode() {
+    /* === מנגנון משופר: הדפסת מדבקות === */
+    function prepareStickerMode() {
+        stickerItems = []; // איפוס רשימה בכל כניסה מחדש לתפריט
+        updateStickerUI();
+        document.getElementById('sticker-setup-area').style.display = 'block';
+        document.getElementById('sticker-active-area').style.display = 'none';
         showScreen('sticker-step');
-        stickerQrCode = new Html5Qrcode("sticker-reader");
+    }
+
+    function startStickerScanning() {
+        document.getElementById('sticker-setup-area').style.display = 'none';
+        document.getElementById('sticker-active-area').style.display = 'block';
         
+        stickerQrCode = new Html5Qrcode("sticker-reader");
         stickerQrCode.start(
             { facingMode: "environment" }, 
             { fps: 10, qrbox: { width: 250, height: 250 } },
@@ -297,53 +279,89 @@
     }
 
     function onStickerScanSuccess(decodedText) {
-        // עצירת הסורק כדי למנוע סריקות כפולות בזמן העיבוד
-        stickerQrCode.pause(true);
-
-        // פירוק הערכים לפי נקודה פסיק וניקוי רווחים מיותרים
-        const items = decodedText.split(';').map(item => item.trim()).filter(item => item !== "");
-
-        if (items.length === 0) {
-            alert("הקוד שנסרק ריק או שאינו מכיל נתונים תקינים.");
-            stickerQrCode.resume();
+        // פירוק הנתונים לפי נקודה-פסיק
+        const parts = decodedText.split(';').map(p => p.trim()).filter(p => p !== "");
+        
+        if (parts.length < 3) {
+            alert("מבנה קוד QR לא תקין. חייב להכיל לפחות Unit, Box ו-QR אחד.");
             return;
         }
 
-        // יצירת תוכן ה-CSV - מספר בכל שורה
-        let csvContent = "\uFEFF"; // תמיכה בעברית/סימנים בתוכנות כמו אקסל
-        items.forEach(num => {
-            csvContent += `"${num}"\n`;
+        const unit = parts[0];
+        const box = parts[1];
+        const qrs = parts.slice(2); // כל שאר הערכים מהמקום השלישי והלאה הם ה-QRs
+
+        // הוספת הנתונים לרשימה הגלובלית שנצברת
+        qrs.forEach(qr => {
+            stickerItems.push({ unit: unit, box: box, qr: qr });
         });
 
-        // יצירת קובץ והורדה
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
+        updateStickerUI();
         
+        // צפצוף קל/חיווי ויזואלי מהיר ואז המשך סריקה מיידי
+        document.getElementById('sticker-active-area').style.backgroundColor = "#e2f0d9";
+        setTimeout(() => {
+            document.getElementById('sticker-active-area').style.backgroundColor = "transparent";
+        }, 300);
+    }
+
+    function updateStickerUI() {
+        document.getElementById('sticker-count').innerText = stickerItems.length;
+        const list = document.getElementById('sticker-list');
+        list.innerHTML = "";
+        
+        if (stickerItems.length === 0) {
+            list.innerHTML = "<li style='list-style:none; color:#999; font-size:12px; text-align:center;'>טרם נסרק קוד תקין</li>";
+            return;
+        }
+
+        // הצגת 15 השורות האחרונות שנלכדו בלבד כדי לשמור על מהירות האפליקציה
+        stickerItems.slice().reverse().slice(0, 15).forEach((item, idx) => {
+            const li = document.createElement('li');
+            li.className = "scan-item";
+            li.style.borderRightColor = "#fd7e14";
+            li.innerHTML = `<span><b>${item.qr}</b> <small style='color:#666;'>(Unit: ${item.unit} | Box: ${item.box})</small></span>`;
+            list.appendChild(li);
+        });
+    }
+
+    function generateStickerReport() {
+        if (stickerItems.length === 0) {
+            alert("לא נאספו נתונים, לא ניתן להפיק קובץ ריק.");
+            return;
+        }
+
+        let csvContent = "\uFEFFUnit,Box,QR\n"; // כותרות העמודות
+        stickerItems.forEach(item => {
+            csvContent += `"${item.unit}","${item.box}","${item.qr}"\n`;
+        });
+
         const now = new Date();
         const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
         
-        a.href = url;
-        a.download = `stickers_${timestamp}.csv`;
-        a.click();
-
-        alert(`נמצאו ${items.length} מספרים. קובץ ה-CSV הופק בהצלחה!`);
+        downloadCSV(csvContent, `stickers_report_${timestamp}.csv`);
+        alert(`קובץ ה-CSV הופק בהצלחה עם ${stickerItems.length} שורות!`);
         
-        // חזרה אוטומטית למסך הראשי ורענון המצב
-        stopStickerScanning();
+        stopStickerScanningProcess();
     }
 
-    function stopStickerScanning() {
+    function stopStickerScanningProcess() {
         if (stickerQrCode) {
             stickerQrCode.stop().then(() => {
                 showScreen('main-menu');
-            }).catch(err => {
-                console.error(err);
-                showScreen('main-menu');
-            });
+            }).catch(() => showScreen('main-menu'));
         } else {
             showScreen('main-menu');
         }
+    }
+
+    function downloadCSV(content, filename) {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
     }
 </script>
 
