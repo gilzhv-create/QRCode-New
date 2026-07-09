@@ -340,9 +340,9 @@
 
         // 1. מיפוי הנתונים למבנה שורות עם כותרות מתאימות
         const dataForExcel = stickerItems.map(item => ({
-            "Unit": item.unit,
-            "Box": item.box,
-            "QR": item.qr
+            "יחידה": item.unit,
+            "מארז": item.box,
+            "מזהה": item.qr
         }));
 
         // 2. יצירת גיליון עבודה (Worksheet) מתוך מערך הנתונים
