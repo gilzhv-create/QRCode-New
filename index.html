@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>מערכת סריקה והדפסה</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; padding: 10px; text-align: center; background-color: #f4f4f9; direction: rtl; }
         .container { max-width: 500px; margin: auto; background: white; padding: 15px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
@@ -54,7 +55,7 @@
         </div>
 
         <div id="reader"></div>
-        <button class="btn-stop" onclick="stopScanning()">סיים והורד דו"ח</button>
+        <button class="btn-stop" onclick="stopScanning()">סיייים והורד דו"ח (CSV)</button>
     </div>
 
     <div id="sticker-step" style="display:none;">
@@ -68,11 +69,11 @@
 
         <div id="sticker-active-area" style="display: none;">
             <div id="sticker-log">
-                <strong>שורות שנצברו ל-CSV (סה"כ: <span id="sticker-count">0</span>):</strong>
+                <strong>שורות שנצברו לאקסל (סה"כ: <span id="sticker-count">0</span>):</strong>
                 <ul id="sticker-list" style="padding: 0; margin: 5px 0 0 0;"></ul>
             </div>
             <div id="sticker-reader"></div>
-            <button class="btn-stop" style="background-color: #28a745;" onclick="generateStickerReport()">סיים והורד קובץ מדבקות</button>
+            <button class="btn-stop" style="background-color: #28a745;" onclick="generateStickerReport()">סיים והורד קובץ מדבקות (Excel)</button>
             <button class="btn-cancel" onclick="stopStickerScanningProcess()">ביטול וחזרה</button>
         </div>
     </div>
@@ -91,7 +92,7 @@
 
 <script>
     let scannedItems = [];
-    let stickerItems = []; // צבירת פריטי מדבקות למסמך אחד
+    let stickerItems = []; 
     let html5QrCode;
     let stickerQrCode;
     let lastResult = "";
@@ -108,7 +109,7 @@
         document.getElementById(screenId).style.display = 'block';
     }
 
-    /* === מנגנון סריקת פריטים === */
+    /* === מנגנון סריקת פריטים (נשאר CSV) === */
     function startScanning() {
         userName = document.getElementById('user-name').value.trim();
         siteId = document.getElementById('site-id').value.trim();
@@ -256,10 +257,19 @@
         location.reload();
     }
 
+    function downloadCSV(content, filename) {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+    }
 
-    /* === מנגנון משופר: הדפסת מדבקות === */
+
+    /* === מנגנון משופר: הדפסת מדבקות - שמירה כ-EXCEL === */
     function prepareStickerMode() {
-        stickerItems = []; // איפוס רשימה בכל כניסה מחדש לתפריט
+        stickerItems = []; 
         updateStickerUI();
         document.getElementById('sticker-setup-area').style.display = 'block';
         document.getElementById('sticker-active-area').style.display = 'none';
@@ -279,7 +289,6 @@
     }
 
     function onStickerScanSuccess(decodedText) {
-        // פירוק הנתונים לפי נקודה-פסיק
         const parts = decodedText.split(';').map(p => p.trim()).filter(p => p !== "");
         
         if (parts.length < 3) {
@@ -289,16 +298,14 @@
 
         const unit = parts[0];
         const box = parts[1];
-        const qrs = parts.slice(2); // כל שאר הערכים מהמקום השלישי והלאה הם ה-QRs
+        const qrs = parts.slice(2); 
 
-        // הוספת הנתונים לרשימה הגלובלית שנצברת
         qrs.forEach(qr => {
             stickerItems.push({ unit: unit, box: box, qr: qr });
         });
 
         updateStickerUI();
         
-        // צפצוף קל/חיווי ויזואלי מהיר ואז המשך סריקה מיידי
         document.getElementById('sticker-active-area').style.backgroundColor = "#e2f0d9";
         setTimeout(() => {
             document.getElementById('sticker-active-area').style.backgroundColor = "transparent";
@@ -315,7 +322,6 @@
             return;
         }
 
-        // הצגת 15 השורות האחרונות שנלכדו בלבד כדי לשמור על מהירות האפליקציה
         stickerItems.slice().reverse().slice(0, 15).forEach((item, idx) => {
             const li = document.createElement('li');
             li.className = "scan-item";
@@ -325,23 +331,36 @@
         });
     }
 
+    // פונקציית יצירת קובץ אקסל אמיתי (XLSX)
     function generateStickerReport() {
         if (stickerItems.length === 0) {
             alert("לא נאספו נתונים, לא ניתן להפיק קובץ ריק.");
             return;
         }
 
-        let csvContent = "\uFEFFUnit,Box,QR\n"; // כותרות העמודות
-        stickerItems.forEach(item => {
-            csvContent += `"${item.unit}","${item.box}","${item.qr}"\n`;
-        });
+        // 1. מיפוי הנתונים למבנה שורות עם כותרות מתאימות
+        const dataForExcel = stickerItems.map(item => ({
+            "Unit": item.unit,
+            "Box": item.box,
+            "QR": item.qr
+        }));
 
+        // 2. יצירת גיליון עבודה (Worksheet) מתוך מערך הנתונים
+        const worksheet = XLSX.utils.json_to_sheet(dataForExcel);
+
+        // 3. יצירת חוברת עבודה (Workbook) והוספת הגיליון אליה
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "מדבקות");
+
+        // 4. יצירת שם קובץ עם חותמת זמן
         const now = new Date();
         const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-        
-        downloadCSV(csvContent, `stickers_report_${timestamp}.csv`);
-        alert(`קובץ ה-CSV הופק בהצלחה עם ${stickerItems.length} שורות!`);
-        
+        const filename = `stickers_report_${timestamp}.xlsx`;
+
+        // 5. הורדה פיזית של קובץ האקסל למחשב/סלולר
+        XLSX.writeFile(workbook, filename);
+
+        alert(`קובץ ה-Excel הופק בהצלחה עם ${stickerItems.length} שורות!`);
         stopStickerScanningProcess();
     }
 
@@ -353,15 +372,6 @@
         } else {
             showScreen('main-menu');
         }
-    }
-
-    function downloadCSV(content, filename) {
-        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.click();
     }
 </script>
 
