@@ -25,6 +25,11 @@
         #log, #sticker-log { margin-top: 15px; text-align: right; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 10px; max-height: 180px; overflow-y: auto; }
         .scan-item { background: #fff; padding: 8px; margin-bottom: 5px; border-radius: 5px; border-right: 4px solid #007bff; list-style: none; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
         .btn-delete { background: #dc3545; color: white; border: none; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin: 0; }
+        
+        /* עיצוב משופר לבאנר חיווי */
+        #sticker-toast-msg { display: none; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 10px; font-size: 15px; transition: all 0.3s ease; }
+        .toast-processing { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+        .toast-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     </style>
 </head>
 <body>
@@ -68,6 +73,8 @@
         </div>
 
         <div id="sticker-active-area" style="display: none;">
+            <div id="sticker-toast-msg"></div>
+
             <div id="sticker-log">
                 <strong>שורות שנצברו לאקסל (סה"כ: <span id="sticker-count">0</span>):</strong>
                 <ul id="sticker-list" style="padding: 0; margin: 5px 0 0 0;"></ul>
@@ -99,6 +106,7 @@
     let userName = "", siteId = "", packageId = "";
     let isUpdatingExisting = false; 
     let existingItemIndex = -1;     
+    let toastTimeout;
 
     function showScreen(screenId) {
         document.getElementById('main-menu').style.display = 'none';
@@ -109,7 +117,7 @@
         document.getElementById(screenId).style.display = 'block';
     }
 
-    /* === מנגנון סריקת פריטים (נשאר CSV) === */
+    /* === מנגנון סריקת פריטים (CSV) === */
     function startScanning() {
         userName = document.getElementById('user-name').value.trim();
         siteId = document.getElementById('site-id').value.trim();
@@ -267,7 +275,7 @@
     }
 
 
-    /* === מנגנון משופר: הדפסת מדבקות - שמירה כ-EXCEL === */
+    /* === מנגנון הדפסת מדבקות - שמירה כ-EXCEL === */
     function prepareStickerMode() {
         stickerItems = []; 
         updateStickerUI();
@@ -289,10 +297,28 @@
     }
 
     function onStickerScanSuccess(decodedText) {
+        if (decodedText === lastResult) return;
+        lastResult = decodedText;
+        
+        // 1. חסימת המצלמה מיידית (המכשיר ננעל לסריקה)
+        stickerQrCode.pause(true);
+        
+        const toast = document.getElementById('sticker-toast-msg');
+        
+        // 2. הפעלת באנר חיווי "חושב" (כחול)
+        toast.className = "toast-processing";
+        toast.innerHTML = `⏳ מעבד נתונים, אנא המתן...`;
+        toast.style.display = 'block';
+        document.getElementById('sticker-active-area').style.backgroundColor = "#cce5ff";
+        
         const parts = decodedText.split(';').map(p => p.trim()).filter(p => p !== "");
         
         if (parts.length < 3) {
             alert("מבנה קוד QR לא תקין. חייב להכיל לפחות Unit, Box ו-QR אחד.");
+            lastResult = "";
+            toast.style.display = 'none';
+            document.getElementById('sticker-active-area').style.backgroundColor = "transparent";
+            stickerQrCode.resume();
             return;
         }
 
@@ -300,16 +326,30 @@
         const box = parts[1];
         const qrs = parts.slice(2); 
 
-        qrs.forEach(qr => {
-            stickerItems.push({ unit: unit, box: box, qr: qr });
-        });
-
-        updateStickerUI();
-        
-        document.getElementById('sticker-active-area').style.backgroundColor = "#e2f0d9";
+        // 3. הזרקת הנתונים למערך לאחר חצי שנייה (דימוי עיבוד קל לחוויה ויזואלית)
         setTimeout(() => {
+            qrs.forEach(qr => {
+                stickerItems.push({ unit: unit, box: box, qr: qr });
+            });
+
+            updateStickerUI();
+            
+            // 4. החלפת הבאנר להצלחה (ירוק)
+            toast.className = "toast-success";
+            toast.innerHTML = `✅ נסרקו בהצלחה <b>${qrs.length}</b> שורות חדשות!`;
+            document.getElementById('sticker-active-area').style.backgroundColor = "#e2f0d9";
+        }, 500);
+
+        // 5. המתנה כוללת של 2 שניות (2000ms) לפני פתיחת המצלמה מחדש
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
             document.getElementById('sticker-active-area').style.backgroundColor = "transparent";
-        }, 300);
+            toast.style.display = 'none';
+            
+            // שחרור החסימה - המכשיר מוכן לסרוק את הברקוד הבא
+            lastResult = ""; 
+            stickerQrCode.resume();
+        }, 2000); 
     }
 
     function updateStickerUI() {
@@ -331,33 +371,26 @@
         });
     }
 
-    // פונקציית יצירת קובץ אקסל אמיתי (XLSX)
     function generateStickerReport() {
         if (stickerItems.length === 0) {
             alert("לא נאספו נתונים, לא ניתן להפיק קובץ ריק.");
             return;
         }
 
-        // 1. מיפוי הנתונים למבנה שורות עם כותרות מתאימות
         const dataForExcel = stickerItems.map(item => ({
             "יחידה": item.unit,
             "מארז": item.box,
             "מזהה": item.qr
         }));
 
-        // 2. יצירת גיליון עבודה (Worksheet) מתוך מערך הנתונים
         const worksheet = XLSX.utils.json_to_sheet(dataForExcel);
-
-        // 3. יצירת חוברת עבודה (Workbook) והוספת הגיליון אליה
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "מדבקות");
 
-        // 4. יצירת שם קובץ עם חותמת זמן
         const now = new Date();
         const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
         const filename = `stickers_report_${timestamp}.xlsx`;
 
-        // 5. הורדה פיזית של קובץ האקסל למחשב/סלולר
         XLSX.writeFile(workbook, filename);
 
         alert(`קובץ ה-Excel הופק בהצלחה עם ${stickerItems.length} שורות!`);
@@ -365,6 +398,7 @@
     }
 
     function stopStickerScanningProcess() {
+        lastResult = "";
         if (stickerQrCode) {
             stickerQrCode.stop().then(() => {
                 showScreen('main-menu');
